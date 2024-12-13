@@ -641,7 +641,7 @@ def summarize_simulated_cohorts(fig, data):
     palettes = {'race': {0: '#66c2a5',
                          1: '#fc8d62', 
                          2: '#8da0cb', 
-                         3: '#e78ac3'},
+                         3: '#e78ac3'}, 
                 'ethnicity': {0: '#9e9ac8', 
                               1: '#54278f'},
                 'sex': {0: '#74c476', 
@@ -910,13 +910,19 @@ def _plot_cont_histogram_by_cohort(ax, data, column, color='#525252',
         ax.set_xlim(*xlim)
 
 
-def _plot_cont_kde_by_cohort(ax, data, column, color='#525252', shade=True,
-                             linewidth=1):
+def _plot_cont_kde_by_cohort(ax, data, column, palette=None, ref_color='#252525', 
+                             shade=True, linewidth=1):
     """
     Plots a kde plot of continous data
     """
+    if palette is None:
+        palette = {0: mpc.to_hex(sn.color_palette()[1]),
+                   1: mpc.to_hex(sn.color_palette()[0]),
+                   }
     trace_vals = data.groupby('cohort')[column].apply(_fit_kde).to_dict()
-    for cohort, y in data.groupby('cohort')['x'].mean().items():
+    for (type_, cohort), y in \
+            data.groupby(['cohort_type', 'cohort'])['x'].mean().items():
+        color = palette.get(type_, ref_color)
         [xx, yy] = trace_vals[cohort]
         yy = yy / yy.max() * 0.75
         y0 = xx * 0 + y - 0.5 + 0.125
@@ -1397,37 +1403,17 @@ def _build_table_plot(fig, cohort_data, n_head=3):
     merged_table.index = \
         np.hstack([np.arange(n_head) + 1, '...', len(cohort_data)])
 
-    # Cleans up the merged_table labels so we can get  unispaced results when
-    # the table gets "plotted"
-    merged_table = \
-        merged_table.unstack().apply(lambda x: f'\\\\texttt{{{x}}}').unstack().T
-    merged_table.rename(
-        columns={x: f'\\\\texttt{{{x}}}' for x in merged_table.columns},
-        index={x: f'\\\\texttt{{{x}}}' for x in merged_table.index},
-        inplace=True
-    )
-
     # Casts the table to latex and does some latex clena up because the versions
     # dont quite line up between what  pandas puts out and what my system
     # at least is set up to handle
-    merged_lt = merged_table.to_latex(column_format='| c | c | c | c | c | c |')
-    # Convers the pandas altex header to actual latex
-    merged_lt = merged_lt.replace('\\textbackslash \\textbackslash texttt', 
-                                  '\\texttt')
-    merged_lt = merged_lt.replace('\\{', '{').replace('\\}', '}')
-    # adds spacer lines between each row
-    for v in np.hstack([sub_table1['m_age'].unique(), '...']):
-        merged_lt = merged_lt.replace(f'\\texttt{{{v}}} \\\\\n', 
-                                      f'\\texttt{{{v}}} \\\\\n \\hline\n')
-    # Adds an index label on the same level ast he rest of the columns
-    merged_lt = merged_lt.replace('&  \\texttt{sex}', 
-                                  '\\texttt{PregID} & \\texttt{sex}')
-    # Cleans up the row splits... probably a latex engine issues
-    for rule_ in ['\\toprule', '\\midrule', '\\bottomrule']:
-        merged_lt = merged_lt.replace(rule_, '\\hline')
-
-    merged_lt = merged_lt.replace('\\hline\n\\hline', '\\hline\n')
-
+    merged_lt = merged_table.to_latex(column_format='| c | c | c | c | c | c |',)
+    relabels = {'\\toprule': '\\hline',
+                '\\midrule': '\\hline',
+                '\\bottomrule': '\\hline',
+                '\\\\\n': '\\\\\n \\hline\n'}
+    for ori, new in relabels.items():
+        merged_lt = merged_lt.replace(ori, new)
+    merged_lt = merged_lt.replace('\\hline\n\\hline', '\\hline')
     # plots the text
     _ = ax.text(x=0.5, 
                 y=0.5, 
@@ -1437,8 +1423,8 @@ def _build_table_plot(fig, cohort_data, n_head=3):
                 size=8.5)
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
-    ax.fill_between([0, 1], y1=0.0, y2=1, color='w')
-    ax.fill_between([0, 1], y1=0.825, y2=1, color='#d1d1d1')
+    ax.fill_between([0.075, 0.925], y1=0.0, y2=1, color='w')
+    ax.fill_between([0.075, 0.925], y1=0.825, y2=1, color='#d1d1d1')
 
 
 def build_sim_sum_icons(fig, sub_data, sim_colors=None, **exp_scatter_kws):
@@ -1760,7 +1746,7 @@ def _build_selection_prob_plot(ax_prob, ax_demo, p_select=0.5, overlay=True):
         ax_c = ax_prob.get_facecolor()
         fig_c = mpc.to_hex(ax_prob.figure.get_facecolor())
         if (ax_c[-1] == 0) & (fig_c[-1] == 0):
-            over_color = '#ffffff'
+            over_color = 'w'
         elif (ax_c[-1] == 0):
             over_color = mpc.to_hex(fig_c)
         else:
@@ -1793,7 +1779,7 @@ def _select_exposure(fig2, cohort_data, smoking_effect, overlay=True):
     a population-based seed or selection critierion
     """
     gs2 = fig2.add_gridspec(2, 4)
-    ax_prob2 = fig2.add_subplot(gs2[1, 0:-1], facecolor='None')
+    ax_prob2 = fig2.add_subplot(gs2[1, 0:-1], facecolor='w')
     ax_demo2 = fig2.add_subplot(gs2[1, 0], facecolor='None')
     ax_prob1 = fig2.add_subplot(gs2[0, 0:-1], facecolor='None')
     ax_demo1 = fig2.add_subplot(gs2[0, 0], facecolor='None')
@@ -1863,30 +1849,17 @@ def _build_exposure_latex_table(cohort_data):
     )
     exp_table.index = exp_table.index + np.array([1, 1, 1, 0, 1])
     exp_table.rename({exp_table.index[-2]: '...'}, inplace=True)
-    exp_table.mask(exp_table.notna(), 
-                   exp_table.dropna().astype(int).astype(str),
-                   inplace=True)
-    exp_table.replace({np.nan: '...'}, inplace=True)
+    exp_table = exp_table['smoking'].apply(
+        lambda x: '...' if pd.isnull(x) else f'{x:1.0f}')
     exp_table.index.set_names('PregID', inplace=True)
-    exp_table.reset_index(inplace=True)
+    exp_table = exp_table.reset_index()
     exp_table2 = exp_table.copy()
 
-    exp_table = \
-        exp_table.unstack().apply(lambda x: f'\\\\texttt{{{x}}}').unstack().T
-    exp_table.rename(
-        columns={x: f'\\\\texttt{{{x}}}' for x in exp_table.columns},
-        inplace=True,)
-
     exp_lt = exp_table.to_latex(index=False, column_format='| c | c |')
-    exp_lt = exp_lt.replace('\\textbackslash \\textbackslash texttt', 
-                            '\\texttt')
-    exp_lt = exp_lt.replace('\\{', '{').replace('\\}', '}')
-    for v in exp_table2['smoking'].unique():
-        exp_lt = exp_lt.replace(f'\\texttt{{{v}}} \\\\\n', 
-                        f'\\texttt{{{v}}} \\\\\n \\hline\n')
-    for rule_ in ['\\toprule', '\\midrule']:
+    for rule_ in ['\\toprule', '\\bottomrule', '\\midrule']:
         exp_lt = exp_lt.replace(rule_, '\\hline')
-    exp_lt = exp_lt.replace('\\bottomrule\n', '')
+    exp_lt = exp_lt.replace('\\\\\n', '\\\\\n\\hline\n')
+    exp_lt = exp_lt.replace('\\hline\n\\hline', '\\hline')
 
     return exp_lt
 
@@ -1986,7 +1959,9 @@ def build_split_figure(fig_c, example_summary, example_data, example_params,
     # Plots the full data set on each set of axes so we have the option to modify
     for i, [ax1, ax0, ax2] in enumerate(ax_sets):
         plot_weight_dist(ax1=ax1, example_data=example_data, 
-                                   colors=example_summary['color'], 
+                                   palette={0: mpc.to_hex(sn.color_palette()[1]),
+                                            1: mpc.to_hex(sn.color_palette()[0])
+                                           },
                                    violin_kws={'width': 1})
         plot_perc(ax0, example_summary)
         plot_bars(ax2=ax2, example_summary=example_summary, 
@@ -2126,7 +2101,7 @@ def pooled_res_plot(fig_cr, fit_res, example_data):
         ax_mod.plot([0, 0], [-0.2, 1.2], 'k-', linewidth=0.75)
         ax_mod.set_xlim(-0.75, 0.1)
         ax_mod.set_yticks(np.linspace(0, 1, 6))
-        ax_mod.set_yticklabels(['Ignore', 'Cohort\nType', 'Fixed', 'GEE', 'LME', 
+        ax_mod.set_yticklabels(['Ignore', 'Cohort\nType', 'Fixed', 'GEE', 'RE', 
                                 'Meta-\nAnalysis'])
         ax_mod.yaxis.set_tick_params(left=False, labelsize=8, length=0)
         ax_mod.xaxis.set_tick_params(labelsize=8,)
