@@ -85,6 +85,22 @@ def fixed_cohort(icc, data, adj):
     return icc, fit, params, True, 'fixed'
 
 
+def fixed_type(icc, data, adj):
+    """
+    A simple function to fit an OLS model treating cohort type as a fixed effect 
+    """
+    fit = smf.ols(f'y ~ C(smoking) + cohort_type + {adj}', data=data).fit()
+    params = pd.Series(
+        np.hstack([fit.params.loc['C(smoking)[T.1]'], 
+                  fit.bse.loc['C(smoking)[T.1]'],
+                  fit.conf_int().loc['C(smoking)[T.1]'],
+                  fit.pvalues.loc['C(smoking)[T.1]'],
+                  ]),
+        index=['param', 'bse', 'ci_lo', 'ci_hi', 'p-value'],
+    )
+    return icc, fit, params, True, 'risk'
+
+
 def gee_cohort(icc, data, adj):
     """
     A simple function to fit a GEE nested by cohort
