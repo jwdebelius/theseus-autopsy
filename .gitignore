@@ -5,6 +5,7 @@ ipynb/output/*
 ipynb/output
 ipynb/output2/
 ipynb/archive
+ipynb/*.tex
 __pycache__/
 *.py[cod]
 *$py.class
