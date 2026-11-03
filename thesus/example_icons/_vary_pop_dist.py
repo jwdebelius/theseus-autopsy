@@ -49,7 +49,7 @@ def show_vary_on_outcome(fig, example_data0, example_data1, arrow_kws=None):
         axs = fig.add_subplot(gs[6 + (4 - y), 2], facecolor='None')
         axa1 = fig.add_subplot(gs[6 + (4 - y), 3], facecolor='None')
         axo = fig.add_subplot(gs[6 + (4- y), 4], facecolor='None')
-        _label_cohort_type(axs, cdf['y'].mean())
+        _label_cohort_type(axs, cdf['cohort_type'].unique()[0])
         _plot_ha_arrow(axa1, arrow_kwargs)
         _plot_cont_kde_by_cohort(axo, data=cdf, column='y')
         axo.set_xlim(-5, 2.5)
@@ -60,7 +60,7 @@ def show_vary_on_outcome(fig, example_data0, example_data1, arrow_kws=None):
     for y, cdf in sub_data0.groupby('x'):
         axo = fig.add_subplot(gs[(4- y), 4], facecolor='None')
         _plot_cont_kde_by_cohort(axo, data=cdf, column='y')
-        axo.set_xlim(-5, 2.5)
+        axo.set_xlim(-5, 4)
         axo.xaxis.set_tick_params(**hide_axes)
         axo.yaxis.set_tick_params(**hide_axes)
         sn.despine(ax=axo, left=True, right=True, top=True, bottom=True)
@@ -562,7 +562,7 @@ def _label_cohort_type(ax, ybar):
     """
     Labels the cohort type based on the mean
     """
-    f_ = lambda x: 'NICU' if (x < -1.75) else 'Gen'
+    f_ = lambda x: 'NICU' if (x == 1) else 'Gen'
     str_ = f_(ybar)
     color = {'NICU': sn.color_palette()[0], 
              'Gen': sn.color_palette()[1],
