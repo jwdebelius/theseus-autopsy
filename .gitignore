@@ -6,6 +6,7 @@ ipynb/output
 ipynb/output2/
 ipynb/archive
 ipynb/*.tex
+ipynb/binary-mater-no-code-test/*
 __pycache__/
 *.py[cod]
 *$py.class
