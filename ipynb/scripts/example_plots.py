@@ -1,18 +1,6 @@
 r"""
-This script will take simulated example data and generate plots showing the 
-indivudal cohort effects and the results of the combined and/or filtered
+This script will take simulated example data and generate plots showing the indivudal cohort effects and the results of the combined and/or filtered
 cohorts
-
-Per-Cohort Displays
-
-* 
-
-Pooled Displays
-* summarize_simulated_cohorts
-
-Either
-* build_table1
-* 
 """
 
 import itertools as it
@@ -34,93 +22,12 @@ from matplotlib import ticker
 import seaborn as sn
 
 import scripts.bw_ana as bw_ana
+import scripts._cohort_plots as coh_plots
 
-
-def build_table1(example_data):
-    """
-    Summarizes the example data into a table 1 and its latex friendly cousin
-
-    Parameters
-    ----------
-    example_data: DataFrame
-        The simulated data frame with columns for the maternal age (m_age),
-        ethnicity (ethnicity), race (race), sex (sex), year (year), exposure
-        (smoking), outcome (y) and cohort id (cohort).
-
-    Returns
-    -------
-    pd.DataFrame
-        A summarized table 1
-    """
-    
-    # Handles the continous statistics by summarizing the data, making tidy
-    # strings, and then making a long form version that will play nicely with 
-    # the categocial data, since the continous data has one groupingt level
-    # (continous covaraite) and the cateogricla data has two (group and 
-    # group_value)
-    cont_stats = example_data.groupby('smoking')[['m_age', 'year']].describe()
-    cont_stats = cont_stats.unstack().unstack(-2)
-
-    cont_stats.index.set_names(['group', 'smoking'], inplace=True)
-    cont_stats.rename(columns={'25%': 'q1', '50%': 'q2',  '75%': 'q3', 
-                               'count': 'sample_size'}, 
-                      inplace=True)
-    cont_stats['mean (std)'] = cont_stats.apply(
-        lambda x: '{mean:>4.1f} ({std:>4.1f})'.format(**x), axis=1)
-    cont_stats['median [25%, 75%]'] = cont_stats.apply(
-        lambda x: '{q2:2.0f} [{q1:2.0f}, {q3:2.0f}]'.format(**x), axis=1)
-    cont_stats = \
-        cont_stats.reset_index().melt(
-        id_vars=['smoking', 'group', 'sample_size'],
-        value_vars=['mean (std)', 'median [25%, 75%]'],
-        var_name='group_value',
-        value_name='tidy',
-        )
-    # Pulls out the categorical data by counting the number of samples ine ach
-    # group. We then to some dataframe clean up, to make it pretty and easier 
-    # to handle. We calculate hte percentage, tidy the whole thing into a 
-    # nice package so we have a long form set of data to matcht he continous
-    # results
-    categorical = pd.DataFrame.from_dict(
-        data={
-            col_: example_data.groupby(['smoking', col_])['y'].count()
-            for col_ in ['race', 'ethnicity', 'sex']
-            }
-        )
-    categorical.index.set_names(['smoking', 'group_value'], inplace=True)
-    categorical.columns.set_names('group', inplace=True)
-    categorical = \
-        categorical.unstack([-1, -2]).dropna()
-    categorical = categorical.reset_index(level=['group', 'group_value'])
-    categorical.rename(columns={0: 'count'}, inplace=True)
-    categorical['sample_size'] = example_data['smoking'].value_counts()
-    categorical['percent'] = categorical['count'] / categorical['sample_size']
-    categorical['tidy'] = categorical.apply(
-        lambda x: '{count:>4.0f} ({percent:>5.1%})'.format(**x), 
-        axis=1)
-
-    # We merge the continous cand categorical data into the long form table,
-    # do some more clean up to make it extra pretty (group value pivots, 
-    # mostly) 
-    example_table1 = pd.concat(
-        axis=0, 
-        objs=[cont_stats, categorical.reset_index()]
-        )
-    example_table1.drop(columns=['count', 'percent'], inplace=True)
-    example_table1['sample_size'] = \
-        example_table1['sample_size'].apply(lambda x: f'(n={x:1.0f})')
-    example_table1 = example_table1.pivot(index=['group', 'group_value'],
-                                          columns=['smoking', 'sample_size'],
-                                          values='tidy',
-                                          )
-    example_table1.drop(
-        index=[('m_age', 'median [25%, 75%]'), ('year', 'mean (std)')],
-        inplace=True
-        )
-    example_table1 = \
-        example_table1.loc[['m_age', 'sex', 'race', 'ethnicity', 'year']]
-
-    return example_table1
+hide_axes = dict(left=False,  labelleft=False, 
+                 right=False, labelright=False,
+                 length=0,
+                 labelsize=0)
 
 
 def build_filter_fits(example_data, filters, models, tech_order):
@@ -153,13 +60,13 @@ def build_filter_fits(example_data, filters, models, tech_order):
     return fit_res
 
 
+
 def build_per_cohort_fit(example_data):
     """
     Fits the per cohort data with an ols and extracts the parameters
 
     Parameters
     ----------
-    example_data: pd.DataFrame
         Simulated data with columns smoking, race, ethncity, sex, m_age, 
         year, the simulated birthweight in y
 
@@ -188,101 +95,8 @@ def build_per_cohort_fit(example_data):
 
     return example_params
 
-def calculate_example_scale(example_params, pass_thresh=2, lim_scale=0.25):
-    """
-    Determines whether parameters need to be plotted with outliers
-    """
-    def _z_score(x):
-        return (x - x.mean()) / x.std()
 
-    example_params = example_params.copy().dropna()
-    # Gets the z-nroamlized variance and parameters so we can exclude values
-    # oustide a threshhold
-    example_params['z_bse'] = (_z_score(example_params['bse']))
-    example_params['z_param'] =  (_z_score(example_params['param']))
-    example_params['pass_bse'] = \
-        np.absolute(example_params['z_bse']) <= pass_thresh
-    example_params['pass_params'] = \
-        np.absolute(example_params['z_param']) <= pass_thresh
-
-    # Figures out the minimum and maximum based ont he axis limits
-    pass_bse_q = \
-        np.absolute(example_params.loc[example_params['pass_bse'], 'bse'])
-    pass_bse_q = pass_bse_q.quantile(0.75)
-    all_pass = example_params[['pass_bse', 'pass_params']].all(axis=1)
-
-    lim_min = min(
-        example_params.loc[all_pass, 'ci_lo'].min(), 
-        example_params.loc[example_params['pass_params'], 'param'].min() - 
-        pass_bse_q
-        )
-    lim_max = max(
-        example_params.loc[all_pass, 'ci_hi'].max(),
-        example_params.loc[example_params['pass_params'], 'param'].max() + 
-        pass_bse_q
-        )
-
-    # Rounds the values so they're pretty
-    lim_min = np.round(np.floor(lim_min / lim_scale), 0) * lim_scale
-    lim_max = np.round(np.ceil(lim_max / lim_scale), 0) * lim_scale
-    lim_dif = lim_max - lim_min
-
-    pass_vals = example_params['param']
-
-    lo_z = (lim_min - pass_vals.mean()) / pass_vals.std()
-    hi_z = (lim_max - pass_vals.mean()) / pass_vals.std()
-
-    example_params['out_window'] = \
-        (example_params['z_param'] < lo_z) * -1 + \
-        (example_params['param'] > hi_z) * 1
-
-    below = example_params.loc[example_params['param'] < lim_min]
-    above = example_params.loc[example_params['param'] > lim_max]
-
-    nom_scaler = 1 / (4 - (len(below) > 0) - len(above > 0))
-    bse2 = np.absolute(example_params.loc[example_params['pass_bse'], 'bse'])
-    bse2 = bse2.mean()
-
-    # Handles the window below the minimum for low outliers.
-    # If there are no low outliers, we don't need an axis, so we drop that
-    # If tehre's one low outlier, we center it in the window. Then, we check
-    # if the window overlaps the existing window. If it does, we widen the 
-    # current limits, and just drop the low window.
-    # If there's more than one value, then we calculate a window starting wtih
-    # the minimum value and allowing a 15% bse window to pad for extending the 
-    # CI. We _should_ put in checks around the limits
-    lo_kwargs = (below['param'], lim_min, lim_max, nom_scaler, pass_bse_q)
-
-    if len(below) == 0:
-        left_, lo_lims, main_lims = _coords_no_outliers(*lo_kwargs)
-    elif len(below) == 1:
-        left_, lo_lims, main_lims = _coords_one_outlier(*lo_kwargs)
-    else:
-        left_, lo_lims, main_lims = _coords_more_outliers(*lo_kwargs)
-
-    hi_kwargs = (above['param'], *main_lims, nom_scaler, pass_bse_q)
-    if len(above) == 0:
-        right_, hi_lims, main_lims = _coords_no_outliers(*hi_kwargs)
-    elif len(above) == 1:
-        right_, hi_lims, main_lims = _coords_one_outlier(*hi_kwargs)
-    else:
-        right_, hi_lims, main_lims = _coords_more_outliers(*hi_kwargs)
-
-    if left_ & ((main_lims[0] != lim_min) | (main_lims[1] != lim_max)) & \
-            (len(below) == 1):
-        left_, lo_lims, main_lims = \
-            _coords_no_outliers(below['params'], *main_lims, nom_scaler, 
-                                pass_bse_q)
-    elif left_ & ((main_lims[0] != lim_min) | (main_lims[1] != lim_max)):
-        left_, lo_lims, main_lims = \
-            _coords_more_outliers(below['params'], lim_min, lim_max, nom_scaler,
-                                  pass_bse_q)
-
-    return left_, right_, main_lims, lo_lims, hi_lims
-
-
-def plot_weight_dist(example_data, ax1, palette, box_kws=None, 
-                     violin_kws=None):
+def plot_weight_dist(example_data, ax1, palette, box_kws=None):
     """
     Plots the distribution of birth weights
     """
@@ -295,16 +109,6 @@ def plot_weight_dist(example_data, ax1, palette, box_kws=None,
     if box_kws is not None:
         box_kwargs.update(box_kws)
 
-    violin_kwargs = dict(inner=None,
-                         linewidth=0.25,
-                         offset=0,
-                         zorder=10,
-                         width=1. ,
-                         cut=0,
-                         )
-    if violin_kws is not None:
-        violin_kwargs.update(violin_kws)
-
     data_kwargs = dict(y='x', x='y', hue='cohort_type',
                        data=example_data,
                        order=np.arange(0, example_data['x'].max() + 1),
@@ -315,8 +119,6 @@ def plot_weight_dist(example_data, ax1, palette, box_kws=None,
                        )
 
     sn.boxplot(**data_kwargs, **box_kwargs)
-    # pt.half_violinplot(**data_kwargs, **violin_kwargs)
-
 
     ax1.grid(axis='y')
     ax1.xaxis.set_tick_params(labelsize=10)
@@ -633,11 +435,12 @@ def plot_table_1(ax, example_table, fontsize=8):
               )
 
 
-def summarize_simulated_cohorts(fig, data):
+def summarize_simulated_cohorts(fig, data,  params, summary, effect, 
+                                forest_kws=None):
     """
     A graphical cohort summary for each of the simulated data sets
     """
-    gs = fig.add_gridspec(1, 8)
+    gs = fig.add_gridspec(1, 9)
     palettes = {'race': {0: '#66c2a5',
                          1: '#fc8d62', 
                          2: '#8da0cb', 
@@ -680,10 +483,14 @@ def summarize_simulated_cohorts(fig, data):
             ax.set_xlabel('Year', size=8)
     
     # Plots the outcome
-    ax = fig.add_subplot(gs[-1], sharey=ax0)
+    ax = fig.add_subplot(gs[-2], sharey=ax0)
     _plot_cont_kde_by_cohort(ax, data, 'y')
     ax.xaxis.set_tick_params(bottom=True, labelbottom=True, labelsize=8)
     ax.set_xlabel('z-score', size=8)
+
+    # Generates the forest plot
+    ax = fig.add_subplot(gs[-1], sharey=ax0)
+    
 
     # Titles the axes
     fig.axes[0].set_title('Cohort size', size=10)
@@ -1070,14 +877,19 @@ def build_sim_process_ref(figul, cohort_data):
     sn.despine(figul, left=True, right=True, top=True, bottom=True)
 
 
-def _plot_dist_ref(ax_dist, fontsize=7.5, color='BuGn', box_kws=None, text_kws=None,):
+def _plot_dist_ref(ax_dist, fontsize=7.5, color='BuGn', box_kws=None, text=True,
+                   text_kws=None, dist_trace_kws=None):
     """
     Makes a square plot for the reference distributions
     """
     colors = sn.color_palette(color, 9)
 
     box_kwargs = dict(facecolor=colors[0], edgecolor=colors[-1], linewidth=1)
+    if isinstance(box_kws, dict):
+        box_kwargs.update(box_kws)
     text_kwargs = dict(color=colors[-1], ha='left', va='top', size=fontsize)
+    if isinstance(text_kws, dict):
+        text_kwargs.update(text_kws)
 
     # Plots the table and text
     for i, label in enumerate(['sex', 'race', 'age']):
@@ -1087,12 +899,13 @@ def _plot_dist_ref(ax_dist, fontsize=7.5, color='BuGn', box_kws=None, text_kws=N
                              **box_kwargs,
                              zorder=2 * i,
                              )
-        ax_dist.text(x=0.05 + i * 0.1, 
-                     y=0.975 - 0.2 * i,
-                     s=label.title(),
-                     zorder=2 * i + 1,
-                     **text_kwargs,
-                    )
+        if text:
+            ax_dist.text(x=0.05 + i * 0.1, 
+                         y=0.975 - 0.2 * i,
+                         s=label.title(),
+                         zorder=2 * i + 1,
+                         **text_kwargs,
+                        )
 
     # Plots the distribution
     x = np.linspace(-2.5, 2.5, 200)
@@ -1101,10 +914,14 @@ def _plot_dist_ref(ax_dist, fontsize=7.5, color='BuGn', box_kws=None, text_kws=N
     x = (x + 2.5) / 6 + 0.3
     y1 = -0.3
     y2 = (y / y.max()) * 0.7 + y1
+    dist_kwargs = dict(linewidth=1.5)
+    if isinstance(dist_trace_kws, dict):
+        dist_kwargs.update(dist_trace_kws)
 
     ax_dist.fill_between(x, y1=y1, y2=y2, linewidth=0, color=colors[4], 
                          zorder=6)
-    ax_dist.plot(x, y2, linewidth=1.5, color=colors[-2], zorder=7)
+    ax_dist.plot(x, y2, color=colors[-2], zorder=7, 
+                 **dist_kwargs)
 
     ax_dist.set_xticks([])
     ax_dist.set_yticks([])
@@ -1322,11 +1139,13 @@ def _plot_gauss_curve(ax, color, ylo=-0.35, yhi=1.45, textoff=0.05,
 
     # Adjusts the y limits to plot the data in new shiny ways
     ylim = ax.get_ylim()
-    ax.set_ylim(ylim[0] + ylo * np.diff(ylim), ylim[0] + np.diff(ylim) * yhi)
+    ydiff = np.diff(ylim)[0]
+    ax.set_ylim(ylim[0] + ylo * ydiff,
+                ylim[0] + ydiff * yhi)
 
     # Annotates the data with the sigma values
     ax.text(x=0, 
-            y=y.max() + np.diff(ylim) * textoff, 
+            y=y.max() + ydiff * textoff, 
             s=f'$\\mu = 0$\n{sigma_eq}', 
             **text_kwargs,
             )
@@ -1335,7 +1154,7 @@ def _plot_gauss_curve(ax, color, ylo=-0.35, yhi=1.45, textoff=0.05,
     if plot_ticks:
         xmin, xmax = ax.get_xlim()
         xticks = np.arange(np.floor(xmin), np.ceil(xmax) + 1, 2)
-        ax.plot(xticks, xticks * 0 - tick_off * np.diff(ylim),
+        ax.plot(xticks, xticks * 0 - tick_off * ydiff,
                    color='k', linestyle='-', marker='|', linewidth=0.75,
                    )
         ax.set_xlim(xmin, xmax)
@@ -1962,7 +1781,7 @@ def build_split_figure(fig_c, example_summary, example_data, example_params,
                                    palette={0: mpc.to_hex(sn.color_palette()[1]),
                                             1: mpc.to_hex(sn.color_palette()[0])
                                            },
-                                   violin_kws={'width': 1})
+                                   )
         plot_perc(ax0, example_summary)
         plot_bars(ax2=ax2, example_summary=example_summary, 
                             lim_min=main_lims[0], lim_max=main_lims[1], left=left, 
@@ -2041,92 +1860,255 @@ def build_split_figure(fig_c, example_summary, example_data, example_params,
               transform=ax2c.transAxes)
 
 
-def pooled_res_plot(fig_cr, fit_res, example_data):
+def pooled_res_plot(fig_cr, fit_res, icc):
     """
-    A truncated fit plot
+    Plots a figure with the pooled results, splitting for space because 
+    we're cool like that
     """
-
-    gs = fig_cr.add_gridspec(5, 7)
-
-    # Plots the brace from the per-cohort simulation
+    gs = fig_cr.add_gridspec(2, 2, width_ratios=[1, 4])
+    
+    # Plots the brackets
     ax_br = fig_cr.add_subplot(gs[:, 0], facecolor='None')
-    ax_br.set_xlim(0, 1)
-    ax_br.set_ylim(0, 1)
-    ax_br.yaxis.set_tick_params(left=False, labelleft=False, right=False, 
-                                labelright=False, length=0, labelsize=0)
-    ax_br.xaxis.set_tick_params(left=False, labelleft=False, right=False, 
-                                labelright=False, length=0, labelsize=0)
+    ax_br.xaxis.set_tick_params(**hide_axes)
+    ax_br.yaxis.set_tick_params(**hide_axes)
     _build_exp_brace(ax_br)
     ax_br.set_xlim(-0.45, 0.15)
     ax_br.set_ylim(-1.25, 1.25)
     ax_br.set_position((0, 0, 0.1, 1))
+    sn.despine(ax=ax_br, left=True, right=True, top=True, bottom=True)
+    
+    # # Adds the forest plots
+    ax_mod1 = fig_cr.add_subplot(gs[0, 1])
+    ax_mod2 = fig_cr.add_subplot(gs[1, 1], sharex=ax_mod1)
+    tidy_short2 = {'gee': "GEE", 'lme': "RE", 'meta': 'MA', 'risk': 'ICS type'}
+    for i, ax_ in enumerate([ax_mod1, ax_mod2]):
+        coh_plots._plot_betas(ax_, None, fit_res, tidy_short2, labelicc=False)
+        sn.despine(ax=ax_, left=False, right=False, 
+                   top=(i == 1), bottom=(i == 0)
+                   )
+        ax_.xaxis.set_tick_params(bottom=(i == 1), labelbottom=(i == 1),
+                                  top=False, labeltop=False,
+                                  labelsize=8, #length={1: None}.get(i, i)
+                                  )
+        ax_.xaxis.get_label().set_visible(i == 1)
 
-    # Plots the fitted result
-    ax_mod1 = fig_cr.add_subplot(gs[2:4, 2:])
-    ax_mod2 = fig_cr.add_subplot(gs[0:2, 2:])
+    # ax_mod1.xaxis.get_label().set_visible(False)
+    # ax_mod1.xaxis.set_tick_params(**hide_axes)
+    # ax_mod1.yaxis.set_tick_params(labelsize=8)
+    ax_mod1.set_ylim(3.5, 5.5)
+    ax_mod2.set_ylim(-0.5, 1.5)
 
-    fit_res = fit_res.xs('none', level='filter').copy()
-    fit_res['y'] = np.linspace(0, 1, 6)
-
-    lme_ = smf.mixedlm(
-        'y ~ 1', 
-        data=example_data.loc[example_data['cohort_type'] == 0],
-        groups=example_data.loc[example_data['cohort_type'] == 0, 'cohort']
-        ).fit()
-    icc = bw_ana.icc_from_lme(lme_)
-
-
-    for ax_mod in ax_mod1, ax_mod2: 
-        ax_mod.errorbar(y='y', x='param', xerr='width',
-                        data=fit_res.loc[fit_res['significant']],
-                        marker=fit_res.iloc[0]['marker'],
-                        color=fit_res.iloc[0]['color'],
-                        markerfacecolor=fit_res.iloc[0]['color'],
-                        markeredgecolor=fit_res.iloc[0]['color'],
-                        capsize=3,
-                        capthick=1,
-                        linestyle='',
-                        )
-        ax_mod.errorbar(y='y', x='param', xerr='width',
-                        data=fit_res.loc[~fit_res['significant']],
-                        marker=fit_res.iloc[0]['marker'],
-                        color=fit_res.iloc[0]['color'],
-                        markerfacecolor='w',
-                        markeredgecolor=fit_res.iloc[0]['color'],
-                        capsize=3,
-                        capthick=1,
-                        linestyle='',
-                        )
-        ax_mod.plot([-0.5, -0.5], [-0.2, 1.2], 'k:', linewidth=0.75)
-        ax_mod.plot([0, 0], [-0.2, 1.2], 'k-', linewidth=0.75)
-        ax_mod.set_xlim(-0.75, 0.1)
-        ax_mod.set_yticks(np.linspace(0, 1, 6))
-        ax_mod.set_yticklabels(['Ignore', 'Cohort\nType', 'Fixed', 'GEE', 'RE', 
-                                'Meta-\nAnalysis'])
-        ax_mod.yaxis.set_tick_params(left=False, labelsize=8, length=0)
-        ax_mod.xaxis.set_tick_params(labelsize=8,)
-        ax_mod.xaxis.set_major_formatter(ticker.StrMethodFormatter('{x:1.1f}'))
-
-    ax_mod2.set_ylim(0.3, -0.1, )
-    ax_mod1.set_ylim(1.1, 1.1 + np.diff(ax_mod2.get_ylim()))
-
-    ax_mod1.set_xlabel('pooled $\\hat{\\beta}_{smoking}$', labelpad=-2)
-    ax_mod2.set_title(f'.ICC={icc:1.2f}', size=8, loc='right', pad=-8)
-
-    sn.despine(ax=ax_mod2, top=False, bottom=True, left=False, right=False)
-    sn.despine(ax=ax_mod1, top=True, bottom=False, left=False, right=False)
-
-    ax_mod2.xaxis.set_tick_params(bottom=False, labelbottom=False, top=False,
-                                  labeltop=False,)
-
+    # sn.despine(ax=ax_mod1, left=False, right=False, top=False, bottom=True)
+    # ax_mod1.set_title(f'ICC={icc_:1.2f}', size=8, loc='right', ha='right')
+    # coh_plots.coh_plots._plot_betas(ax_mod2, icc_, fit_res, tidy_short, labelicc=False)
+    # ax_mod2.xaxis.set_tick_params(labelsize=8)
+    # ax_mod2.xaxis.set_major_locator(ticker.MaxNLocator(3))
+    # ax_mod2.xaxis.get_label().set_size(8)
+    # ax_mod2.yaxis.set_tick_params(labelsize=8)
+    # sn.despine(ax=ax_mod2, top=True, left=False, right=False, bottom=False)
+    
     d = 0.03
     kwargs = dict(color='k', clip_on=False, linewidth=0.75, zorder=3)
-    ax_mod1.plot((0+d, 0-d), (1-2*d, 1+2*d), **kwargs, transform=ax_mod1.transAxes)
-    ax_mod1.plot((1+d, 1-d), (1-2*d, 1+2*d), **kwargs, transform=ax_mod1.transAxes)
-    ax_mod2.plot((0+d, 0-d), (0-2*d, 0+2*d), **kwargs, transform=ax_mod2.transAxes)
-    ax_mod2.plot((1+d, 1-d), (0-2*d, 0+2*d), **kwargs, transform=ax_mod2.transAxes)
+    ax_mod1.plot((0+d, 0-d), (0-2*d, 0+2*d), **kwargs, 
+                 transform=ax_mod1.transAxes)
+    ax_mod1.plot((1+d, 1-d), (0-2*d, 0+2*d), **kwargs, 
+                 transform=ax_mod1.transAxes)
+    ax_mod2.plot((0+d, 0-d), (1-2*d, 1+2*d), **kwargs, 
+                 transform=ax_mod2.transAxes)
+    ax_mod2.plot((1+d, 1-d), (1-2*d, 1+2*d), **kwargs, 
+                 transform=ax_mod2.transAxes)
 
-    sn.despine(ax=ax_br, left=True, right=True, top=True, bottom=True)
 
-    x, y, dx, dy = ax_mod2.get_position().bounds
-    ax_mod2.set_position((x, y + 1 / 50, dx, dy))
+def summarize_simulation_parameters(fig_seed, scenario_bool, seed_eff, rs, 
+                                    example_icc):
+    """
+    Summarizes the scenario parameters. Intended for a 6x0.75 figure
+    """
+    fig_scene, fig_eff, fig_icc, _ = \
+        fig_seed.subfigures(1, 4, 
+                            width_ratios=[1, 1.5, 1.75, 1.75], 
+                            facecolor='None')
+    _build_scene_grid_vert(fig_scene, scenario_bool)
+    _plot_effect_box_no_mod(fig_eff)
+    _plot_seed_icc(fig_icc, example_icc)
+
+
+def calculate_example_scale(example_params, pass_thresh=2, lim_scale=0.25):
+    """
+    Determines whether parameters need to be plotted with outliers
+    """
+    def _z_score(x):
+        return (x - x.mean()) / x.std()
+
+    example_params = example_params.copy().dropna()
+    # Gets the z-nroamlized variance and parameters so we can exclude values
+    # oustide a threshhold
+    example_params['z_bse'] = (_z_score(example_params['bse']))
+    example_params['z_param'] =  (_z_score(example_params['param']))
+    example_params['pass_bse'] = \
+        np.absolute(example_params['z_bse']) <= pass_thresh
+    example_params['pass_params'] = \
+        np.absolute(example_params['z_param']) <= pass_thresh
+
+    # Figures out the minimum and maximum based ont he axis limits
+    pass_bse_q = \
+        np.absolute(example_params.loc[example_params['pass_bse'], 'bse'])
+    pass_bse_q = pass_bse_q.quantile(0.75)
+    all_pass = example_params[['pass_bse', 'pass_params']].all(axis=1)
+
+    lim_min = min(
+        example_params.loc[all_pass, 'ci_lo'].min(), 
+        example_params.loc[example_params['pass_params'], 'param'].min() - 
+        pass_bse_q
+        )
+    lim_max = max(
+        example_params.loc[all_pass, 'ci_hi'].max(),
+        example_params.loc[example_params['pass_params'], 'param'].max() + 
+        pass_bse_q
+        )
+
+    # Rounds the values so they're pretty
+    lim_min = np.round(np.floor(lim_min / lim_scale), 0) * lim_scale
+    lim_max = np.round(np.ceil(lim_max / lim_scale), 0) * lim_scale
+    lim_dif = lim_max - lim_min
+
+    pass_vals = example_params['param']
+
+    lo_z = (lim_min - pass_vals.mean()) / pass_vals.std()
+    hi_z = (lim_max - pass_vals.mean()) / pass_vals.std()
+
+    example_params['out_window'] = \
+        (example_params['z_param'] < lo_z) * -1 + \
+        (example_params['param'] > hi_z) * 1
+
+    below = example_params.loc[example_params['param'] < lim_min]
+    above = example_params.loc[example_params['param'] > lim_max]
+
+    nom_scaler = 1 / (4 - (len(below) > 0) - len(above > 0))
+    bse2 = np.absolute(example_params.loc[example_params['pass_bse'], 'bse'])
+    bse2 = bse2.mean()
+
+    # Handles the window below the minimum for low outliers.
+    # If there are no low outliers, we don't need an axis, so we drop that
+    # If tehre's one low outlier, we center it in the window. Then, we check
+    # if the window overlaps the existing window. If it does, we widen the 
+    # current limits, and just drop the low window.
+    # If there's more than one value, then we calculate a window starting wtih
+    # the minimum value and allowing a 15% bse window to pad for extending the 
+    # CI. We _should_ put in checks around the limits
+    lo_kwargs = (below['param'], lim_min, lim_max, nom_scaler, pass_bse_q)
+
+    if len(below) == 0:
+        left_, lo_lims, main_lims = _coords_no_outliers(*lo_kwargs)
+    elif len(below) == 1:
+        left_, lo_lims, main_lims = _coords_one_outlier(*lo_kwargs)
+    else:
+        left_, lo_lims, main_lims = _coords_more_outliers(*lo_kwargs)
+
+    hi_kwargs = (above['param'], *main_lims, nom_scaler, pass_bse_q)
+    if len(above) == 0:
+        right_, hi_lims, main_lims = _coords_no_outliers(*hi_kwargs)
+    elif len(above) == 1:
+        right_, hi_lims, main_lims = _coords_one_outlier(*hi_kwargs)
+    else:
+        right_, hi_lims, main_lims = _coords_more_outliers(*hi_kwargs)
+
+    if left_ & ((main_lims[0] != lim_min) | (main_lims[1] != lim_max)) & \
+            (len(below) == 1):
+        left_, lo_lims, main_lims = \
+            _coords_no_outliers(below['params'], *main_lims, nom_scaler, 
+                                pass_bse_q)
+    elif left_ & ((main_lims[0] != lim_min) | (main_lims[1] != lim_max)):
+        left_, lo_lims, main_lims = \
+            _coords_more_outliers(below['params'], lim_min, lim_max, nom_scaler,
+                                  pass_bse_q)
+
+    return left_, right_, main_lims, lo_lims, hi_lims
+
+
+def _extract_sub_data(full_data, ref_ds):
+    """
+    Determines the reference dataset and reference data
+    """
+    ref_x = full_data.loc[full_data['cohort'].isin([ref_ds]), 'x'].unique()[0]
+    ref_ds = np.hstack([full_data['x'].min(), 
+                        full_data['x'].max(),
+                        np.linspace(-2, 2, 5) + ref_x])
+    sub_data = full_data.loc[full_data['x'].isin(ref_ds)].copy()
+    sub_data.sort_values('x', ascending=True, inplace=True)
+    sub_data.reset_index(drop=True, inplace=True)
+    sub_data['xo'] = sub_data['x'].copy()
+    sub_data['x'] = (~sub_data['cohort'].duplicated(keep='first')) * 1 
+    r1 = np.ones(sub_data['xo'].shape)
+    sub_data['x'] = sub_data['x'] + \
+        sub_data['x'] * (sub_data['xo'] == (r1 * (ref_x - 2))) * 0.75 + \
+        sub_data['x'] * (sub_data['xo'] > (r1 * (ref_x + 2))) * 0.75 + \
+        sub_data['x'] * (sub_data['xo'] == (r1 * (ref_x - 0))) * 0.25 + \
+        sub_data['x'] * (sub_data['xo'] == (r1 * (ref_x + 1))) * 0.25 + \
+        0
+    sub_data['x'] = sub_data['x'].cumsum()
+    sub_data['x'] = sub_data['x'] - sub_data['x'].min()
+
+    return sub_data
+
+
+def _plot_inset(fig, sub_data):
+    """
+    Highlights a simulated dataset in a dataset
+    """
+    gs = fig.add_gridspec(1, 7)
+    ax_r = fig.add_subplot(gs[0], facecolor='None')
+    ax_r.xaxis.set_tick_params(**hide_axes)
+    ax_r.yaxis.set_tick_params(**hide_axes)
+    sn.despine(ax=ax_r, left=True, right=True, top=True, bottom=True)
+
+    # Plots the categorical plots
+    coh_plots._wrap_categorical_bars(fig, gs, sub_data, 
+                                     cat_pos={'race': 0,
+                                              'ethnicity': 1,
+                                              'sex': 2,
+                                              'smoking': 5,}
+                                     )
+    # plots the histogram and kdes
+    coh_plots._summarise_histogram(fig, gs, sub_data, off=3)
+    coh_plots._summarize_kde(fig, gs, sub_data, off=6)
+
+    # Tidies the axes
+    for i, ax_ in enumerate(fig.axes):
+        ax_.set_title(['', 'Race', 'Eth.', 'Sex', 'Smoke', 'M. age', 'Year', 
+                       'BW Z'][i],
+                       size=8)
+        ax_.set_ylim(fig.axes[1].get_ylim())
+        ax_.set_facecolor('None')
+        ax_.xaxis.set_tick_params(labelsize=8)
+        ax_.text(np.mean(ax_.get_xlim()), y=7.9, s='...', 
+                 ha='center', va='center', size=10)
+        ax_.text(np.mean(ax_.get_xlim()), y=1.2, s='...', 
+                 ha='center', va='center', size=10)
+    fig.axes[-1].xaxis.set_major_formatter(ticker.StrMethodFormatter('{x:1.0f}'))
+
+    # Adds overlay axis to highlight the simulated cohort
+    axo = fig.add_subplot(gs[:, :], facecolor='None')
+    axo.xaxis.set_tick_params(**hide_axes)
+    axo.yaxis.set_tick_params(**hide_axes)
+    axo.set_ylim(ax_.get_ylim())
+    axo.set_xlim(0, 1)
+    axo.fill_between([-0.5, 1.5], -1, 3 + 1/3, alpha=2/3, facecolor='w', 
+                     edgecolor='None')
+    axo.fill_between([-0.5, 1.5], 10, 4 + 2/3, alpha=2/3, facecolor='w', 
+                     edgecolor='None')
+    axo.fill_between([0.005, 0.995], 3 + 1/3, 4 + 2/3, facecolor='None',
+                     edgecolor='k', linewidth=1.25)
+    sn.despine(ax=axo, left=True, right=True, top=True, bottom=True)
+    axo.set_yticks([3.825])
+    axo.set_yticklabels(['$\\Rightarrow$'], size=8, weight='bold')
+    axo.yaxis.set_tick_params(labelleft=True)
+
+
+def plot_example_cohort(fig, example_data, ref_ds):
+    """
+    Wraps the example cohort display for a the example simulation
+    """
+    sub_data = _extract_sub_data(example_data, ref_ds)
+    _plot_inset(fig, sub_data)
+

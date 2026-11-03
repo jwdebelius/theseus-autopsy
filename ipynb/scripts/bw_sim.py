@@ -1,5 +1,7 @@
 import numpy as np
 import pandas as pd
+from scipy.stats import t as t_dist
+
 
 import patsy
 import statsmodels.formula.api as smf
@@ -166,16 +168,16 @@ def simulate_log_birthweight_gest_age(ga_days,
     y = mu + delta + e.
     They fit a data using a markov-Chain Monte Carlo simulations with
     uninformed priors, they found and determined
-    * The relationship between the mean, $\mu$ and gestational age is cubic.
+    * The relationship between the mean, mu and gestational age is cubic.
     * The delta term is a random effect common to the two methods of 
       fitting weight.
         * It follows a normal distribution with a mean of 0 and standard 
           deviaton sigma_{d}
-        * The relationship between \sigma_{d} and gestational age is linear
+        * The relationship between sigma_{d} and gestational age is linear
     * e is a random effect specific to the birth weight measurement
         * It follows a normal distribution with mean 0 and standard
-          deviation \sigma_{e}
-        * \sigma_{e} does not vary with gestational age.
+          deviation sigma_{e}
+        * sigma_{e} does not vary with gestational age.
 
     Parameters
     ----------
@@ -255,22 +257,23 @@ def simulate_log_birthweight_gest_age(ga_days,
     return np.power(10, mu + delta + e)
 
 
-def simulate_cohort(cohort_seeds: dict,
-                    betas: pd.Series,
-                    icc: float,
-                    smoking_effect: float,
-                    indv_var: float=1,
-                    slope_var: float=0,
-                    g_age_col: str=None,
-                    baseline_exposure_p: float=0.1,
-                    exposure_demo_mod: dict=None,
-                    exposure_cohort_mod: dict=None,
-                    cohort_types: dict=None,
-                    type_effect: dict=None,
-                    type_slope: dict=None,
-                    formula: str='1 + C(sex) + C(race) + C(ethnicity) + m_age + year',
-                    rescale: bool=False,
-                    ):
+def simulate_cohort(
+    cohort_seeds: dict,
+    betas: pd.Series,
+    icc: float,
+    smoking_effect: float,
+    indv_var: float=1,
+    slope_var: float=0,
+    g_age_col: str=None,
+    baseline_exposure_p: float=0.1,
+    exposure_demo_mod: dict=None,
+    exposure_cohort_mod: dict=None,
+    cohort_types: dict=None,
+    type_effect: dict=None,
+    type_slope: dict=None,
+    formula: str='1 + C(sex) + C(race) + C(ethnicity) + m_age + year',
+    rescale: bool=False,
+    ):
     """
     Simulates a cohort based on seed parameters
 
@@ -399,7 +402,8 @@ def simulate_cohort(cohort_seeds: dict,
     cohort_random = simulate_cohort_effects(
         np.hstack([demo_dmat.columns, 'C(smoking)[T.1]']),
         cohort_ids,
-        iccs=np.hstack([icc, np.zeros(len(demo_dmat.columns) - 1), slope_var]),
+        iccs=np.hstack([bw_ana.convert_icc_to_g_var_no_slope(icc),
+                        np.zeros(len(demo_dmat.columns) - 1), slope_var]),
         )
     cohort_random = cohort_random * random_scale
     cohort_intercept = \
@@ -435,6 +439,10 @@ def simulate_cohort(cohort_seeds: dict,
     else:
         data = data.loc[data['y'] >= -5].copy()
         sim_vals = sim_vals.loc[data.index]
+
+    summary = _tabulate_example_data(data, levels=['cohort_type', 'mean'])
+    xpos = summary['x_pos'].astype(str)
+    data['x'] = data['cohort'].replace(xpos).astype(float)
 
     return data, sim_vals
 
@@ -605,7 +613,7 @@ def simulate_gestational_age(size,  n=None, p=None, p_late=None,
 
     # Decides if the infant is late
     late_check = weeks_from_40['from_40'].isin(p_late.keys())
-    weeks_from_40['prob_late'] = 0
+    weeks_from_40['prob_late'] = 0.0
     weeks_from_40.loc[late_check, 'prob_late'] = \
         weeks_from_40.loc[late_check, 'from_40'].replace(p_late)
     weeks_from_40['is_late'] = \
@@ -618,3 +626,65 @@ def simulate_gestational_age(size,  n=None, p=None, p_late=None,
     weeks_from_40['gest_age'] = weeks_from_40['offset'] + baseline
 
     return weeks_from_40['gest_age'].values
+
+
+def _tabulate_example_data(example_data, levels=['cohort_type', 'mean'], 
+                          palette=None):
+    """
+    Combines the example data fits and calculates the x position
+    """
+    example_summary = pd.concat(
+        axis=1, 
+        objs=[_extract_example_data_summary(example_data), 
+              _summarize_example_smoking(example_data)]
+    )
+    example_summary.sort_values(levels, ascending=True, inplace=True)
+    example_summary.reset_index(level='cohort_type', inplace=True)
+
+    example_summary['x_pos'] = 1
+    example_summary['x_pos'] = \
+        example_summary['x_pos'].cumsum() + \
+        example_summary['cohort_type'] * 2 - 1
+
+    return example_summary
+
+
+def _extract_example_data_summary(example_data):
+    """
+    A helper function to summarize the outcome
+    """
+    example_bw = \
+        example_data.groupby(['cohort_type', 'cohort'])['y'].describe()
+    example_bw.reset_index(inplace=True)
+    example_bw = example_bw.melt(
+        id_vars=['cohort_type', 'cohort'],
+        var_name='statistic',
+        )
+    example_bw['covariate'] = 'y'
+    example_bw = example_bw.pivot(
+        index=['cohort_type', 'cohort', 'covariate'],
+        columns='statistic',
+        values='value',
+    )
+    example_bw['sem'] = example_bw['std'] / np.sqrt(example_bw['count'] - 1)
+    example_bw['t'] = t_dist.ppf(0.975, example_bw['count'] - 1)
+    example_bw['ci'] = example_bw['sem'] * example_bw['t']
+    example_bw.sort_values(['cohort_type', 'mean'], 
+                           ascending=True,
+                           inplace=True)
+    example_bw.reset_index(level='covariate', inplace=True, drop=True)
+
+    return example_bw
+
+
+def _summarize_example_smoking(example_data):
+    """
+    Checks the example data summary for the proprtion of smokers
+    """
+    smoke_counts = \
+        example_data.groupby(['cohort_type', 'cohort', 'smoking'])['y'].count()
+    smoke_counts = smoke_counts.unstack(-1)
+    smoke_counts.fillna(0, inplace=True)
+    smoke_perc = smoke_counts.div(smoke_counts.sum(axis=1).values, axis=0)
+
+    return smoke_perc.add_prefix('smoke_')

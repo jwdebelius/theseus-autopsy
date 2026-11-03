@@ -15,7 +15,7 @@ def icc_from_lme(lme_fit):
     Estimates an Interclass Correlation from the fit model
     """
     var_covar = lme_fit.cov_params()
-    icc = var_covar.loc['Group Var', 'Group Var'] / np.trace(var_covar)
+    icc = var_covar.loc['cohort Var', 'cohort Var'] / np.trace(var_covar)
     return icc
 
 
@@ -29,13 +29,13 @@ def convert_icc_to_g_var_no_slope(icc1):
     g_var = np.sqrt((1/(1 - icc1)) - 1)
     return g_var
 
-def convert_icc_to_g_var_slope(icc1, num_cohorts):
-    """
-    Estimates the required g_var vale to simulate based on a seed ICC 
+# def convert_icc_to_g_var_slope(icc1, num_cohorts, ):
+#     """
+#     Estimates the required g_var vale to simulate based on a seed ICC 
 
-    Directly based on the sim.icc function from the R multilevel package
-    https://rdrr.io/cran/multilevel/man/sim.icc.html
-    """
+#     Directly based on the sim.icc function from the R multilevel package
+#     https://rdrr.io/cran/multilevel/man/sim.icc.html
+#     """
     
 
 
@@ -106,7 +106,7 @@ def gee_cohort(icc, data, adj):
     A simple function to fit a GEE nested by cohort
     """
     fit = smf.gee(f'y ~ C(smoking) + {adj}', 
-                  groups=data['cohort'], 
+                  groups='cohort', 
                   cov_struct=sms.cov_struct.Exchangeable(),
                   data=data).fit()
     params = pd.Series(
@@ -124,7 +124,8 @@ def lme_cohort(icc, data, adj):
     """
     A simple function to fit an LME with cohort as a random intercept
     """
-    fit = smf.mixedlm(f'y ~ C(smoking) + {adj}', groups=data['cohort'], 
+    fit = smf.mixedlm(f'y ~ C(smoking) + {adj}', 
+                      groups='cohort', 
                       data=data).fit()
     params = pd.Series(
         np.hstack([fit.params.loc['C(smoking)[T.1]'], 
