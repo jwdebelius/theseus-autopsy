@@ -3,6 +3,8 @@
 */.DS_Store
 ipynb/output/*
 ipynb/output
+ipynb/output2/
+ipynb/archive
 __pycache__/
 *.py[cod]
 *$py.class
